@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Docker Compose Visualizer</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+:root {
+  --bg: #050b14;
+  --bg-card: #0b1324;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --accent: #00f0ff;
+  --accent-sec: #b829dd;
+  --success: #39ff14;
+  --warning: #ffcc00;
+  --danger: #ff3366;
+  --border: rgba(148,163,184,0.18);
+  --shadow: 0 0 25px rgba(0,240,255,0.06);
+  --terminal: 'Fira Code', 'Consolas', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { min-height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(0,240,255,0.03) 1px, transparent 1px),
+    linear-gradient(rgba(0,240,255,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: -1;
+}
+header {
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: rgba(11,19,36,0.85);
+  backdrop-filter: blur(8px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand { display: flex; align-items: center; gap: 0.8rem; }
+.brand-logo {
+  width: 42px; height: 42px; border-radius: 0.6rem;
+  background: linear-gradient(135deg, var(--accent), var(--accent-sec));
+  display: grid; place-items: center;
+  color: var(--bg); font-weight: 900; font-size: 1.3rem;
+  box-shadow: 0 0 18px rgba(0,240,255,0.35);
+}
+h1 { font-size: 1.25rem; letter-spacing: -0.02em; }
+.tagline { font-size: 0.78rem; color: var(--text-muted); font-family: var(--terminal); }
+main { max-width: 1200px; width: 100%; margin: 0 auto; padding: 1.5rem; }
+.editor-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+  margin-bottom: 1.5rem;
+}
+.toolbar { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.btn {
+  padding: 0.6rem 1.1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: rgba(15,23,42,0.9);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.88rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 4px 14px rgba(0,240,255,0.15); border-color: var(--accent); color: var(--accent); }
+.btn.primary { border-color: var(--accent); color: var(--accent); }
+.btn.primary:hover { background: rgba(0,240,255,0.08); box-shadow: 0 0 16px rgba(0,240,255,0.25); }
+.btn.example { border-color: var(--accent-sec); color: #e0aaff; }
+.btn.clear { border-color: #64748b; color: var(--text-muted); }
+#yaml-input {
+  width: 100%;
+  min-height: 260px;
+  background: #070d18;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 1rem;
+  font-family: var(--terminal);
+  font-size: 0.85rem;
+  resize: vertical;
+  outline: none;
+}
+#yaml-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,240,255,0.08); }
+.message {
+  margin-top: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  font-size: 0.88rem;
+  display: none;
+}
+.message.show { display: block; }
+.message.error { background: rgba(255,51,102,0.1); border-color: rgba(255,51,102,0.3); color: #fecdd3; }
+.message.warning { background: rgba(255,204,0,0.08); border-color: rgba(255,204,0,0.25); color: #fef08a; }
+.message.success { background: rgba(57,255,20,0.08); border-color: rgba(57,255,20,0.25); color: #bbf7a8; }
+.diagram-section {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  min-height: 360px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.diagram-title { margin: 0 0 1rem; font-size: 1.2rem; color: var(--text); }
+.diagram-title:first-child { margin-top: 0; }
+.cards-container {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 1.5rem;
+}
+.service-card {
+  background: linear-gradient(145deg, rgba(30,41,59,0.9), rgba(22,32,50,0.95));
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1.1rem;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  position: relative;
+  z-index: 3;
+  overflow: hidden;
+}
+.service-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--accent);
+  opacity: 0.8;
+}
+.service-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: 0 12px 34px rgba(0,240,255,0.14);
+}
+.service-card.has-deps::before { background: var(--warning); box-shadow: 0 0 12px rgba(255,204,0,0.35); }
+.service-card.is-dep::before { background: var(--success); box-shadow: 0 0 12px rgba(57,255,20,0.35); }
+.service-card.has-deps.is-dep::before {
+  background: linear-gradient(180deg, var(--warning), var(--success));
+}
+.card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.8rem; }
+.service-name { font-size: 1.15rem; font-weight: 700; color: var(--text); word-break: break-word; font-family: var(--terminal); }
+.service-type { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; padding: 0.25rem 0.55rem; border-radius: 999px; background: rgba(0,240,255,0.12); color: var(--accent); border: 1px solid rgba(0,240,255,0.2); }
+.card-row { display: flex; align-items: flex-start; gap: 0.6rem; margin-bottom: 0.55rem; font-size: 0.9rem; }
+.card-row:last-child { margin-bottom: 0; }
+.card-label { color: var(--text-muted); min-width: 62px; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; margin-top: 0.15rem; letter-spacing: 0.03em; }
+.card-value { color: var(--text); word-break: break-word; line-height: 1.35; }
+.port-badge {
+  display: inline-block;
+  background: rgba(57,255,20,0.1);
+  color: var(--success);
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.45rem;
+  margin: 0.15rem 0.15rem 0 0;
+  font-size: 0.8rem;
+  font-family: var(--terminal);
+  border: 1px solid rgba(57,255,20,0.15);
+}
+.deps-list { margin-top: 0.35rem; }
+.dep-chip {
+  display: inline-block;
+  background: rgba(255,204,0,0.1);
+  color: var(--warning);
+  border-radius: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  margin: 0.2rem 0.2rem 0 0;
+  font-size: 0.8rem;
+  font-family: var(--terminal);
+  border: 1px solid rgba(255,204,0,0.15);
+}
+#connections-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.connection-line { fill: none; stroke: var(--warning); stroke-width: 2.5; marker-end: url(#arrowhead); opacity: 0.95; filter: drop-shadow(0 0 4px rgba(255,204,0,0.5)); }
+.placeholder { text-align: center; color: var(--text-muted); padding: 3rem 1rem; }
+.placeholder svg { width: 64px; height: 64px; margin-bottom: 1rem; opacity: 0.45; }
+.infra-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin-top: 1rem; }
+.infra-card {
+  background: linear-gradient(145deg, rgba(12,20,36,0.9), rgba(8,14,26,0.95));
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.infra-card:hover { border-color: currentColor; transform: translateX(4px); }
+.infra-card.volume { border-left: 3px solid var(--volume); color: var(--volume); }
+:root { --volume: #39ff14; --network: #b829dd; }
+.infra-card.network { border-left: 3px solid var(--network); color: var(--network); }
+.infra-icon { width: 36px; height: 36px; border-radius: 0.4rem; display: grid; place-items: center; font-size: 1.1rem; background: rgba(255,255,255,0.05); }
+.infra-name { font-family: var(--terminal); font-weight: 700; color: var(--text); font-size: 0.9rem; }
+.infra-type { font-size: 0.65rem; text-transform: uppercase; color: var(--text-muted); margin-top: 0.15rem; }
+.infra-empty { color: var(--text-muted); font-size: 0.85rem; font-style: italic; padding: 0.5rem 0; }
+.validation-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background: rgba(255,51,102,0.05);
+  border: 1px solid rgba(255,51,102,0.2);
+  display: none;
+}
+.validation-panel.show { display: block; }
+.validation-panel h4 { margin: 0 0 0.6rem; color: var(--danger); font-family: var(--terminal); font-size: 0.85rem; text-transform: uppercase; }
+.validation-panel ul { margin: 0; padding-left: 1.2rem; color: var(--text-muted); font-size: 0.82rem; }
+.validation-panel li { margin-bottom: 0.35rem; }
+.validation-panel.success { background: rgba(0,255,136,0.05); border-color: rgba(0,255,136,0.2); }
+.validation-panel.success h4 { color: var(--success); }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2,6,23,0.92);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+  padding: 1rem;
+  backdrop-filter: blur(8px);
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  width: 100%;
+  max-width: 640px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 30px rgba(0,240,255,0.08);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title { font-size: 1rem; font-family: var(--terminal); color: var(--accent); }
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 1.6rem; cursor: pointer; line-height: 1; }
+.modal-close:hover { color: var(--danger); }
+.modal-body { padding: 1.25rem; overflow: auto; }
+.yaml-raw {
+  background: #070d18;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  font-family: var(--terminal);
+  font-size: 0.82rem;
+  color: #a5f3fc;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+footer {
+  text-align: center;
+  padding: 1.25rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  border-top: 1px solid var(--border);
+  background: rgba(11,19,36,0.85);
+}
+@media (max-width: 700px) {
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .btn { justify-content: center; }
+  .cards-container { grid-template-columns: 1fr; }
+  .infra-grid { grid-template-columns: 1fr; }
+}
+
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="brand-logo">DC</div>
+    <div>
+      <h1>Docker Compose Visualizer</h1>
+      <div class="tagline">DevOps Stack Topology &amp; Validation</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="editor-section" aria-label="Editor YAML">
+    <div class="toolbar">
+      <button id="btn-visualize" class="btn primary" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        Visualizar
+      </button>
+      <button id="btn-example" class="btn example" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+        Carregar Exemplo
+      </button>
+      <button id="btn-clear" class="btn clear" type="button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+        Limpar
+      </button>
+    </div>
+    <label for="yaml-input" class="sr-only">Cole o conteúdo do docker-compose.yml</label>
+    <textarea id="yaml-input" spellcheck="false" placeholder="Cole aqui o conteúdo do docker-compose.yml..."></textarea>
+    <div id="message" class="message" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="diagram-section" aria-label="Diagrama">
+    <h2 class="diagram-title">Stack Topology</h2>
+    <div id="cards-container" class="cards-container">
+      <svg id="connections-layer"><defs><marker id="arrowhead" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0, 12 4, 0 8" fill="#ffcc00" /></marker></defs></svg>
+      <div class="placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+          <line x1="6" y1="6" x2="6.01" y2="6"></line>
+          <line x1="6" y1="18" x2="6.01" y2="18"></line>
+        </svg>
+        <p>Aguardando manifesto...<br>Digite ou cole um <code>docker-compose.yml</code> e execute <strong>Visualizar</strong>.</p>
+      </div>
+    </div>
+
+    <div id="infra-section" style="display:none;">
+      <h3 class="diagram-title" style="margin-top:2rem;">Volumes</h3>
+      <div id="volumes-container" class="infra-grid"></div>
+
+      <h3 class="diagram-title" style="margin-top:2rem;">Networks</h3>
+      <div id="networks-container" class="infra-grid"></div>
+    </div>
+
+    <div id="validation-section"></div>
+  </section>
+</main>
+
+<div id="modal-overlay" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title" class="modal-title">Detalhes</h3>
+      <button id="modal-close" class="modal-close" aria-label="Fechar">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre id="modal-content" class="yaml-raw"></pre>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Docker Compose Visualizer &mdash; DevOps Stack Topology
+</footer>
+
+  <script>
+const EXAMPLE_COMPOSE = 'version: "3.9"\n\nservices:\n  web:\n    image: nginx:alpine\n    ports:\n      - "80:80"\n      - "443:443"\n    depends_on:\n      - api\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n    networks:\n      - frontend\n      - backend\n\n  api:\n    image: node:18-alpine\n    ports:\n      - "3000:3000"\n    depends_on:\n      - db\n    environment:\n      NODE_ENV: production\n      DB_HOST: db\n    networks:\n      - backend\n\n  db:\n    image: postgres:15-alpine\n    ports:\n      - "5432:5432"\n    environment:\n      POSTGRES_USER: app\n      POSTGRES_PASSWORD: secret\n      POSTGRES_DB: appdb\n    volumes:\n      - db_data:/var/lib/postgresql/data\n    networks:\n      - backend\n\nvolumes:\n  db_data:\n\nnetworks:\n  frontend:\n  backend:';
+
+    const textarea = document.getElementById('yaml-input');
+    const btnVisualize = document.getElementById('btn-visualize');
+    const btnExample = document.getElementById('btn-example');
+    const btnClear = document.getElementById('btn-clear');
+    const messageEl = document.getElementById('message');
+    const cardsContainer = document.getElementById('cards-container');
+    const connectionsLayer = document.getElementById('connections-layer');
+    const diagramSection = document.getElementById('diagram-section');
+    const infraSection = document.getElementById('infra-section');
+    const volumesContainer = document.getElementById('volumes-container');
+    const networksContainer = document.getElementById('networks-container');
+    const validationSection = document.getElementById('validation-section');
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalTitle = document.getElementById('modal-title');
+    const modalContent = document.getElementById('modal-content');
+    const modalClose = document.getElementById('modal-close');
+
+    let currentServices = {};
+    let rawDoc = null;
+
+    function showMessage(text, type = 'info') {
+      messageEl.textContent = text;
+      messageEl.className = 'message show ' + type;
+    }
+
+    function clearMessage() {
+      messageEl.textContent = '';
+      messageEl.className = 'message';
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function cssEscape(value) {
+      return String(value).replace(/([^a-zA-Z0-9_-])/g, '\\');
+    }
+
+    function formatPorts(ports) {
+      if (!ports) return [];
+      if (Array.isArray(ports)) {
+        return ports.map(p => String(p).trim()).filter(Boolean);
+      }
+      if (typeof ports === 'string' || typeof ports === 'number') {
+        return [String(ports)];
+      }
+      if (typeof ports === 'object') {
+        return Object.entries(ports).map(([k, v]) => k + ':' + v);
+      }
+      return [];
+    }
+
+    function formatNetworks(nets) {
+      if (!nets) return [];
+      if (Array.isArray(nets)) return nets.filter(n => typeof n === 'string');
+      if (typeof nets === 'object') return Object.keys(nets);
+      if (typeof nets === 'string') return [nets];
+      return [];
+    }
+
+    function formatVolumes(vols) {
+      if (!vols) return [];
+      if (Array.isArray(vols)) return vols.filter(v => typeof v === 'string');
+      if (typeof vols === 'object') return Object.keys(vols);
+      return [];
+    }
+
+    function normalizeDependsOn(deps) {
+      if (!deps) return [];
+      if (Array.isArray(deps)) return deps.filter(d => typeof d === 'string');
+      if (typeof deps === 'object') return Object.keys(deps);
+      if (typeof deps === 'string') return [deps];
+      return [];
+    }
+
+    function parseYaml(text) {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        throw new Error('O campo YAML está vazio. Cole o conteúdo do docker-compose.yml para continuar.');
+      }
+      try {
+        const doc = jsyaml.load(trimmed);
+        if (doc === null || doc === undefined) {
+          throw new Error('O YAML não parece conter nenhum dado.');
+        }
+        if (typeof doc !== 'object' || Array.isArray(doc)) {
+          throw new Error('O YAML deve ser um objeto (mapa) com pelo menos a chave "services".');
+        }
+        return doc;
+      } catch (err) {
+        if (err.name === 'YAMLException') {
+          const mark = err.mark ? 'Linha ' + (err.mark.line + 1) + ', coluna ' + (err.mark.column + 1) : '';
+          throw new Error('YAML malformado. ' + (mark ? mark + ': ' : '') + (err.reason || err.message));
+        }
+        throw err;
+      }
+    }
+
+    function validateSemantics(doc) {
+      const issues = [];
+      const services = doc.services || {};
+      const serviceNames = Object.keys(services);
+      const volumes = doc.volumes || {};
+      const networks = doc.networks || {};
+      const declaredVolumes = new Set(Object.keys(volumes));
+      const declaredNetworks = new Set(Object.keys(networks));
+
+      if (serviceNames.length === 0) return issues;
+
+      const allPorts = [];
+      serviceNames.forEach(name => {
+        const svc = services[name];
+        if (!svc || typeof svc !== 'object') return;
+
+        normalizeDependsOn(svc.depends_on).forEach(dep => {
+          if (!services[dep]) {
+            issues.push('[' + name + '] depends_on aponta para serviço inexistente: "' + dep + '"');
+          }
+        });
+
+        const vols = formatVolumes(svc.volumes);
+        vols.forEach(v => {
+          const volName = String(v).split(':')[0];
+          if (volName && !volName.startsWith('.') && !volName.startsWith('/') && !volName.startsWith('~') && !declaredVolumes.has(volName)) {
+            issues.push('[' + name + '] volume não declarado em volumes: "' + volName + '"');
+          }
+        });
+
+        formatNetworks(svc.networks).forEach(net => {
+          if (!declaredNetworks.has(net)) {
+            issues.push('[' + name + '] network não declarada em networks: "' + net + '"');
+          }
+        });
+
+        formatPorts(svc.ports).forEach(p => {
+          const hostPort = String(p).split(':')[0];
+          if (/^\d+$/.test(hostPort)) {
+            allPorts.push({ port: parseInt(hostPort, 10), service: name });
+          }
+        });
+      });
+
+      const portMap = {};
+      allPorts.forEach(({ port, service }) => {
+        if (!portMap[port]) portMap[port] = [];
+        portMap[port].push(service);
+      });
+      Object.entries(portMap).forEach(([port, svcs]) => {
+        if (svcs.length > 1) {
+          issues.push('Porta ' + port + ' exposta por múltiplos serviços: ' + svcs.join(', '));
+        }
+      });
+
+      return issues;
+    }
+
+    function renderCards(services) {
+      cardsContainer.innerHTML = '<svg id="connections-layer"><defs><marker id="arrowhead" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0, 12 4, 0 8" fill="#ffcc00" /></marker></defs></svg>';
+      const serviceNames = Object.keys(services);
+
+      if (serviceNames.length === 0) {
+        cardsContainer.innerHTML = cardsContainer.innerHTML + '\n        <div class="placeholder">\n          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">\n            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>\n            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>\n            <line x1="6" y1="6" x2="6.01" y2="6"></line>\n            <line x1="6" y1="18" x2="6.01" y2="18"></line>\n          </svg>\n          <p>Nenhum serviço definido no docker-compose.yml.</p>\n        </div>';
+        return;
+      }
+
+      const dependedOn = new Set();
+      serviceNames.forEach(name => {
+        const svc = services[name] || {};
+        normalizeDependsOn(svc.depends_on).forEach(dep => {
+          if (services[dep]) dependedOn.add(dep);
+        });
+      });
+
+      serviceNames.forEach(name => {
+        const svc = services[name] || {};
+        const ports = formatPorts(svc.ports);
+        const deps = normalizeDependsOn(svc.depends_on);
+        const nets = formatNetworks(svc.networks);
+        const image = svc.image ? String(svc.image) : '(build / não informada)';
+
+        const card = document.createElement('div');
+        card.className = 'service-card';
+        if (deps.length) card.classList.add('has-deps');
+        if (dependedOn.has(name)) card.classList.add('is-dep');
+        card.dataset.service = name;
+
+        const portsHtml = ports.length
+          ? ports.map(p => '<span class="port-badge">' + escapeHtml(p) + '</span>').join('')
+          : '<span class="card-value" style="color:var(--text-muted)">—</span>';
+
+        const netsHtml = nets.length
+          ? nets.map(n => '<span class="port-badge" style="background:rgba(184,41,221,0.1);color:var(--network);border-color:rgba(184,41,221,0.25);">' + escapeHtml(n) + '</span>').join('')
+          : '';
+
+        const depsHtml = deps.length
+          ? '<div class="deps-list">' + deps.map(d => '<span class="dep-chip">' + escapeHtml(d) + '</span>').join('') + '</div>'
+          : '';
+
+        card.innerHTML = '' +
+          '<div class="card-header">' +
+            '<span class="service-name">' + escapeHtml(name) + '</span>' +
+            '<span class="service-type">service</span>' +
+          '</div>' +
+          '<div class="card-row">' +
+            '<span class="card-label">Imagem</span>' +
+            '<span class="card-value">' + escapeHtml(image) + '</span>' +
+          '</div>' +
+          '<div class="card-row">' +
+            '<span class="card-label">Portas</span>' +
+            '<span class="card-value">' + portsHtml + '</span>' +
+          '</div>' +
+          (nets.length ? '<div class="card-row"><span class="card-label">Networks</span><span class="card-value">' + netsHtml + '</span></div>' : '') +
+          (deps.length ? '<div class="card-row"><span class="card-label">Depende</span><span class="card-value">' + depsHtml + '</span></div>' : '');
+
+        card.addEventListener('click', function() { openModal('service', name); });
+        cardsContainer.appendChild(card);
+      });
+    }
+
+    function drawConnections(services) {
+      const svg = connectionsLayer;
+      let defs = svg.querySelector('defs');
+      if (!defs) {
+        defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        defs.innerHTML = '<marker id="arrowhead" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0, 12 4, 0 8" fill="#ffcc00" /></marker>';
+        svg.appendChild(defs);
+      }
+      svg.innerHTML = '';
+      svg.appendChild(defs);
+
+      const containerRect = cardsContainer.getBoundingClientRect();
+      if (!containerRect.width || !containerRect.height) return;
+
+      svg.setAttribute('width', containerRect.width);
+      svg.setAttribute('height', containerRect.height);
+      svg.style.width = containerRect.width + 'px';
+      svg.style.height = containerRect.height + 'px';
+
+      const serviceNames = Object.keys(services);
+      serviceNames.forEach(sourceName => {
+        const svc = services[sourceName] || {};
+        const deps = normalizeDependsOn(svc.depends_on);
+        deps.forEach(targetName => {
+          if (!services[targetName]) return;
+          const sourceCard = cardsContainer.querySelector('[data-service="' + cssEscape(sourceName) + '"]');
+          const targetCard = cardsContainer.querySelector('[data-service="' + cssEscape(targetName) + '"]');
+          if (!sourceCard || !targetCard) return;
+
+          const sourceRect = sourceCard.getBoundingClientRect();
+          const targetRect = targetCard.getBoundingClientRect();
+
+          const x1 = sourceRect.left + sourceRect.width / 2 - containerRect.left;
+          const y1 = sourceRect.top - containerRect.top;
+          const x2 = targetRect.left + targetRect.width / 2 - containerRect.left;
+          const y2 = targetRect.bottom - containerRect.top;
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('class', 'connection-line');
+          const c1y = y1 - 50;
+          const c2y = y2 + 50;
+          path.setAttribute('d', 'M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + c1y + ', ' + x2 + ' ' + c2y + ', ' + x2 + ' ' + y2);
+          svg.appendChild(path);
+        });
+      });
+    }
+
+    function renderInfra(doc) {
+      const volumes = doc && doc.volumes && typeof doc.volumes === 'object' ? doc.volumes : {};
+      const networks = doc && doc.networks && typeof doc.networks === 'object' ? doc.networks : {};
+      const volNames = Object.keys(volumes);
+      const netNames = Object.keys(networks);
+
+      if (volNames.length === 0 && netNames.length === 0) {
+        infraSection.style.display = 'none';
+        return;
+      }
+      infraSection.style.display = 'block';
+
+      volumesContainer.innerHTML = '';
+      if (volNames.length === 0) {
+        volumesContainer.innerHTML = '<div class="infra-empty">Nenhum volume declarado</div>';
+      } else {
+        volNames.forEach(name => {
+          const div = document.createElement('div');
+          div.className = 'infra-card volume';
+          div.innerHTML = '<div class="infra-icon">💾</div><div><div class="infra-name">' + escapeHtml(name) + '</div><div class="infra-type">volume</div></div>';
+          div.addEventListener('click', function() { openModal('volume', name); });
+          volumesContainer.appendChild(div);
+        });
+      }
+
+      networksContainer.innerHTML = '';
+      if (netNames.length === 0) {
+        networksContainer.innerHTML = '<div class="infra-empty">Nenhuma network declarada</div>';
+      } else {
+        netNames.forEach(name => {
+          const div = document.createElement('div');
+          div.className = 'infra-card network';
+          div.innerHTML = '<div class="infra-icon">🌐</div><div><div class="infra-name">' + escapeHtml(name) + '</div><div class="infra-type">network</div></div>';
+          div.addEventListener('click', function() { openModal('network', name); });
+          networksContainer.appendChild(div);
+        });
+      }
+    }
+
+    function renderValidation(issues) {
+      if (issues.length === 0) {
+        validationSection.innerHTML = '<div class="validation-panel success"><h4>✓ Validação Semântica</h4><ul><li>Nenhum problema encontrado no manifesto.</li></ul></div>';
+      } else {
+        validationSection.innerHTML = '<div class="validation-panel"><h4>⚠ Validação Semântica</h4><ul>' +
+          issues.map(i => '<li>' + escapeHtml(i) + '</li>').join('') + '</ul></div>';
+      }
+      validationSection.style.display = 'block';
+    }
+
+    function openModal(kind, name) {
+      if (!rawDoc) return;
+      let block = null;
+      if (kind === 'service' && rawDoc.services) block = rawDoc.services[name];
+      if (kind === 'volume' && rawDoc.volumes) block = rawDoc.volumes[name];
+      if (kind === 'network' && rawDoc.networks) block = rawDoc.networks[name];
+
+      if (block === undefined || block === null) return;
+      const snippet = jsyaml.dump({ [name]: block }, { indent: 2 });
+      const label = kind === 'service' ? 'Serviço' : kind === 'volume' ? 'Volume' : 'Network';
+      modalTitle.textContent = label + ': ' + name;
+      modalContent.textContent = snippet;
+      modalOverlay.classList.add('show');
+    }
+
+    function closeModal() {
+      modalOverlay.classList.remove('show');
+    }
+
+    function visualize() {
+      clearMessage();
+      try {
+        rawDoc = parseYaml(textarea.value);
+        currentServices = rawDoc.services || {};
+
+        if (!currentServices || Object.keys(currentServices).length === 0) {
+          renderCards({});
+          renderInfra(rawDoc);
+          showMessage('Nenhum serviço foi encontrado no docker-compose.yml. Verifique se existe a chave "services".', 'warning');
+          validationSection.innerHTML = '';
+          return;
+        }
+
+        renderCards(currentServices);
+        renderInfra(rawDoc);
+        const issues = validateSemantics(rawDoc);
+        renderValidation(issues);
+
+        requestAnimationFrame(function() {
+          drawConnections(currentServices);
+        });
+        showMessage('Visualização gerada com sucesso: ' + Object.keys(currentServices).length + ' serviço(s), ' + Object.keys(rawDoc.volumes || {}).length + ' volume(s), ' + Object.keys(rawDoc.networks || {}).length + ' network(s).', 'success');
+      } catch (err) {
+        renderCards({});
+        connectionsLayer.innerHTML = '';
+        infraSection.style.display = 'none';
+        validationSection.innerHTML = '';
+        showMessage(err.message, 'error');
+      }
+    }
+
+    btnVisualize.addEventListener('click', visualize);
+    btnExample.addEventListener('click', function() {
+      textarea.value = EXAMPLE_COMPOSE;
+      clearMessage();
+      visualize();
+    });
+    btnClear.addEventListener('click', function() {
+      textarea.value = '';
+      cardsContainer.innerHTML = '\n        <svg id="connections-layer"><defs><marker id="arrowhead" markerWidth="12" markerHeight="8" refX="10" refY="4" orient="auto"><polygon points="0 0, 12 4, 0 8" fill="#ffcc00" /></marker></defs></svg>\n        <div class="placeholder">\n          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">\n            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>\n            <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>\n            <line x1="6" y1="6" x2="6.01" y2="6"></line>\n            <line x1="6" y1="18" x2="6.01" y2="18"></line>\n          </svg>\n          <p>Aguardando manifesto...<br>Digite ou cole um <code>docker-compose.yml</code> e execute <strong>Visualizar</strong>.</p>\n        </div>';
+      connectionsLayer.innerHTML = '';
+      infraSection.style.display = 'none';
+      validationSection.innerHTML = '';
+      rawDoc = null;
+      currentServices = {};
+      clearMessage();
+    });
+
+    modalClose.addEventListener('click', closeModal);
+    modalOverlay.addEventListener('click', function(e) {
+      if (e.target === modalOverlay) closeModal();
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    let resizeTimeout;
+    window.addEventListener('resize', function() {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(function() {
+        if (currentServices && Object.keys(currentServices).length) {
+          drawConnections(currentServices);
+        }
+      }, 150);
+    });
+
+  </script>
+</body>
+</html>
